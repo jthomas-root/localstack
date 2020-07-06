@@ -351,6 +351,10 @@ def md5(string):
     return m.hexdigest()
 
 
+def select_attributes(object, attributes):
+    return dict([(k, v) for k, v in object.items() if k in attributes])
+
+
 def in_docker():
     return config.in_docker()
 
@@ -1152,6 +1156,14 @@ def clean_cache(file_pattern=CACHE_FILE_PATTERN,
 
 def truncate(data, max_length=100):
     return ('%s...' % data[:max_length]) if len(data or '') > max_length else data
+
+
+def escape_html(string, quote=False):
+    if six.PY2:
+        import cgi
+        return cgi.escape(string, quote=quote)
+    import html
+    return html.escape(string, quote=quote)
 
 
 def parallelize(func, list, size=None):

@@ -20,7 +20,7 @@ from localstack.config import HOSTNAME, HOSTNAME_EXTERNAL
 from localstack.utils.aws import aws_stack
 from localstack.services.s3 import multipart_content
 from localstack.utils.common import (
-    short_uid, timestamp_millis, to_str, to_bytes, clone, md5, get_service_protocol, now_utc
+    short_uid, timestamp_millis, to_str, to_bytes, clone, md5, get_service_protocol, now_utc, is_base64
 )
 from localstack.utils.analytics import event_publisher
 from localstack.utils.http_utils import uses_chunked_encoding
@@ -716,7 +716,10 @@ def bucket_exists(bucket_name):
 def check_content_md5(data, headers):
     actual = md5(strip_chunk_signatures(data))
     try:
-        expected = to_str(codecs.encode(base64.b64decode(headers['Content-MD5']), 'hex'))
+        md5_header = headers['Content-MD5']
+        if not is_base64(md5_header):
+            raise Exception('Content-MD5 header is not in Base64 format: "%s"' % md5_header)
+        expected = to_str(codecs.encode(base64.b64decode(md5_header), 'hex'))
     except Exception:
         return error_response('The Content-MD5 you specified is not valid.', 'InvalidDigest', status_code=400)
     if actual != expected:
@@ -1110,12 +1113,12 @@ class ProxyListenerS3(PersistingProxyListener):
                 response.headers['Location'] = expand_redirect_url(redirect_url, key, bucket_name)
                 LOGGER.debug('S3 POST {} to {}'.format(response.status_code, response.headers['Location']))
 
+            expanded_data = multipart_content.expand_multipart_filename(data, headers)
             key, status_code = multipart_content.find_multipart_key_value(
-                data, headers, 'success_action_status'
+                expanded_data, headers, 'success_action_status'
             )
 
-            if response.status_code == 200 and status_code == '201' and key:
-                response.status_code = 201
+            if response.status_code == 201 and key:
                 response._content = self.get_201_response(key, bucket_name)
                 response.headers['Content-Length'] = str(len(response._content))
                 response.headers['Content-Type'] = 'application/xml; charset=utf-8'

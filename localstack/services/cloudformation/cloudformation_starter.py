@@ -172,6 +172,12 @@ def update_physical_resource_id(resource):
         elif isinstance(resource, service_models.ElasticsearchDomain):
             resource.physical_resource_id = resource.params.get('DomainName')
 
+        elif isinstance(resource, dynamodb_models.Table):
+            resource.physical_resource_id = resource.name
+
+        elif isinstance(resource, dynamodb2_models.Table):
+            resource.physical_resource_id = resource.name
+
         else:
             LOG.warning('Unable to determine physical_resource_id for resource %s' % type(resource))
 
@@ -650,7 +656,13 @@ def apply_patches():
         func_name = props.get('FunctionName') or ''
         if ':lambda:' in func_name:
             props['FunctionName'] = aws_stack.lambda_function_name(func_name)
-        return Mapping_create_from_cloudformation_json_orig(resource_name, cloudformation_json, region_name)
+        try:
+            return Mapping_create_from_cloudformation_json_orig(resource_name, cloudformation_json, region_name)
+        except Exception:
+            LOG.info('Unable to add Lambda event mapping for source ARN "%s" in moto backend (ignoring)' %
+                props.get('EventSourceArn'))
+            # return an empty dummy instance, to avoid downstream None value issues
+            return service_models.BaseModel()
 
     Mapping_create_from_cloudformation_json_orig = lambda_models.EventSourceMapping.create_from_cloudformation_json
     lambda_models.EventSourceMapping.create_from_cloudformation_json = Mapping_create_from_cloudformation_json

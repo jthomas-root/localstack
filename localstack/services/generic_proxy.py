@@ -351,10 +351,10 @@ def modify_and_forward(method=None, path=None, data_bytes=None, headers=None, fo
             # get status code from response, or use Bad Gateway status code
             code = listener_result if isinstance(listener_result, int) else 503
             response = Response()
-            response._content = ''
-            # TODO add CORS headers here?
-            response.headers['Content-Length'] = '0'
             response.status_code = code
+            response._content = ''
+            response.headers['Content-Length'] = '0'
+            append_cors_headers(response)
             return response
 
     # perform the actual invocation of the backend service
@@ -371,9 +371,13 @@ def modify_and_forward(method=None, path=None, data_bytes=None, headers=None, fo
         response = requests_method(request_url, data=data_to_send,
             headers=headers, stream=True)
 
-        # prevent requests from processing response body
-        if not response._content_consumed and response.raw:
-            response._content = response.raw.read()
+    # prevent requests from processing response body (e.g., to pass-through gzip encoded content unmodified)
+    pass_raw = ((hasattr(response, '_content_consumed') and not response._content_consumed) or
+        response.headers.get('content-encoding') in ['gzip'])
+    if pass_raw and response.raw:
+        new_content = response.raw.read()
+        if new_content:
+            response._content = new_content
 
     # update listener (post-invocation)
     if listeners:

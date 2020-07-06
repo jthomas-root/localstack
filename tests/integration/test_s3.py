@@ -500,6 +500,39 @@ class S3ListenerTest(unittest.TestCase):
         # clean up
         self._delete_bucket(bucket_name, [object_key])
 
+    def test_s3_presigned_post_success_action_status_201_response(self):
+        bucket_name = 'test-presigned-%s' % short_uid()
+        self.s3_client.create_bucket(Bucket=bucket_name)
+        body = 'something body'
+        # get presigned URL
+        object_key = 'key-${filename}'
+        presigned_request = self.s3_client.generate_presigned_post(
+            Bucket=bucket_name,
+            Key=object_key,
+            Fields={'success_action_status': 201},
+            ExpiresIn=60
+        )
+        files = {'file': ('my-file', body)}
+        response = requests.post(presigned_request['url'], data=presigned_request['fields'], files=files, verify=False)
+        # test
+        expected_response_content = """
+                <PostResponse>
+                    <Location>{location}</Location>
+                    <Bucket>{bucket}</Bucket>
+                    <Key>{key}</Key>
+                    <ETag>{etag}</ETag>
+                </PostResponse>
+                """.format(
+            location='http://localhost/key-my-file',
+            bucket=bucket_name,
+            key='key-my-file',
+            etag='d41d8cd98f00b204e9800998ecf8427f'
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.text, expected_response_content)
+        # clean up
+        self._delete_bucket(bucket_name, ['key-my-file'])
+
     def test_s3_presigned_post_expires(self):
         bucket_name = 'test-bucket-%s' % short_uid()
         self.s3_client.create_bucket(Bucket=bucket_name)
@@ -700,15 +733,17 @@ class S3ListenerTest(unittest.TestCase):
         self.s3_client.create_bucket(Bucket=bucket_name)
 
         # put object with invalid content MD5
-        for hash in ['__invalid__', '000']:
-            raised = False
-            try:
+        hashes = {
+            '__invalid__': 'InvalidDigest',
+            '000': 'InvalidDigest',
+            'not base64 encoded checksum': 'InvalidDigest',  # InvalidDigest
+            'MTIz': 'BadDigest'  # "123" base64 encoded
+        }
+        for hash, error in hashes.items():
+            with self.assertRaises(Exception) as ctx:
                 self.s3_client.put_object(Bucket=bucket_name, Key='test-key',
                     Body='something', ContentMD5=hash)
-            except Exception:
-                raised = True
-            if not raised:
-                raise Exception('Invalid MD5 hash "%s" should have raised an error' % hash)
+            self.assertIn(error, str(ctx.exception))
 
         # Cleanup
         self.s3_client.delete_bucket(Bucket=bucket_name)
@@ -717,7 +752,7 @@ class S3ListenerTest(unittest.TestCase):
         bucket_name = 'test-bucket-%s' % short_uid()
         self.s3_client.create_bucket(Bucket=bucket_name)
 
-        data = '000000000000000000000000000000'
+        data = '1234567890 ' * 100
 
         # Write contents to memory rather than a file.
         upload_file_object = BytesIO()
@@ -734,7 +769,7 @@ class S3ListenerTest(unittest.TestCase):
         with gzip.GzipFile(fileobj=download_file_object, mode='rb') as filestream:
             downloaded_data = filestream.read().decode('utf-8')
 
-        self.assertEqual(downloaded_data, data, '{} != {}'.format(downloaded_data, data))
+        self.assertEqual(downloaded_data, data)
 
     def test_set_external_hostname(self):
         bucket_name = 'test-bucket-%s' % short_uid()
